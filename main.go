@@ -13,141 +13,149 @@ import (
 	"time"
 )
 
-// ============================================================================
-// MODELS
-// ============================================================================
+// Request and response types
 
 type Lead struct {
-	Email            string  `json:"email"`
-	Firstname        string  `json:"firstname,omitempty"`
-	Lastname         string  `json:"lastname,omitempty"`
-	Company          string  `json:"company,omitempty"`
-	Jobtitle         string  `json:"jobtitle,omitempty"`
-	Industry         string  `json:"industry,omitempty"`
-	Phone            string  `json:"phone,omitempty"`
-	City             string  `json:"city,omitempty"`
-	Country          string  `json:"country,omitempty"`
-	LeadStatus       string  `json:"lead_status,omitempty"`
-	EmailOpenCount   int     `json:"email_open_count,omitempty"`
-	EmailClickCount  int     `json:"email_click_count,omitempty"`
-	NumDeals         int     `json:"num_deals,omitempty"`
-	DealAmount       float64 `json:"deal_amount,omitempty"`
-	CreateDate       string  `json:"create_date,omitempty"`
-	NotesLastUpdated string  `json:"notes_last_updated,omitempty"`
+	Email             string  `json:"email"`
+	Firstname         string  `json:"firstname,omitempty"`
+	Lastname          string  `json:"lastname,omitempty"`
+	Company           string  `json:"company,omitempty"`
+	Jobtitle          string  `json:"jobtitle,omitempty"`
+	Industry          string  `json:"industry,omitempty"`
+	Phone             string  `json:"phone,omitempty"`
+	City              string  `json:"city,omitempty"`
+	Country           string  `json:"country,omitempty"`
+	Lead_status       string  `json:"lead_status,omitempty"`
+	Email_open_count  int     `json:"email_open_count,omitempty"`
+	Email_click_count int     `json:"email_click_count,omitempty"`
+	Num_deals         int     `json:"num_deals,omitempty"`
+	Deal_amount       float64 `json:"deal_amount,omitempty"`
+	Create_date       string  `json:"create_date,omitempty"`
+	Notes_last_update string  `json:"notes_last_updated,omitempty"`
 }
 
-type LeadsRequest struct {
-	Leads    []Lead `json:"leads"`
-	ClientID string `json:"client_id,omitempty"`
-	APIKey   string `json:"api_key"`
-	Email    string `json:"email"`
+type Leads_request struct {
+	Leads     []Lead `json:"leads"`
+	Client_id string `json:"client_id,omitempty"`
+	Api_key   string `json:"api_key"`
+	Email     string `json:"email"`
 }
 
-type ScoreFactor struct {
+type Leads_response struct {
+	Scores    []Lead_score `json:"scores"`
+	Method    string       `json:"method"`
+	Client_id string       `json:"client_id"`
+}
+
+type Lead_score struct {
+	Email   string         `json:"email"`
+	Score   int            `json:"score"`
+	Label   string         `json:"label"`
+	Factors []Score_factor `json:"factors"`
+}
+
+type Score_factor struct {
 	Name         string  `json:"name"`
 	Weight       float64 `json:"weight"`
 	Value        float64 `json:"value"`
 	Contribution float64 `json:"contribution"`
 }
 
-type LeadScore struct {
-	Email   string        `json:"email"`
-	Score   int           `json:"score"`
-	Label   string        `json:"label"`
-	Factors []ScoreFactor `json:"factors"`
+type Config_response struct {
+	Weights   map[string]float64 `json:"weights"`
+	Client_id string             `json:"client_id"`
+	Method    string             `json:"method"`
 }
 
-type LeadsResponse struct {
-	Scores   []LeadScore `json:"scores"`
-	Method   string      `json:"method"`
-	ClientID string      `json:"client_id"`
-}
-
-type ConfigResponse struct {
-	Weights  map[string]float64 `json:"weights"`
-	ClientID string             `json:"client_id"`
-	Method   string             `json:"method"`
-}
-
-type ErrorResponse struct {
+type Error_response struct {
 	Error string `json:"error"`
 }
 
-// ============================================================================
-// CONFIG
-// ============================================================================
+// HubSpot workflow types
+
+type Workflow_request struct {
+	Origin       Workflow_origin `json:"origin"`
+	Object       Workflow_object `json:"object"`
+	Input_fields map[string]any  `json:"inputFields"`
+}
+
+type Workflow_origin struct {
+	Portal_id            int    `json:"portalId"`
+	Action_definition_id string `json:"actionDefinitionId"`
+}
+
+type Workflow_object struct {
+	Object_id   int            `json:"objectId"`
+	Object_type string         `json:"objectType"`
+	Properties  map[string]any `json:"properties"`
+}
+
+type Workflow_response struct {
+	Output_fields map[string]any `json:"outputFields"`
+}
+
+// Config
 
 var (
-	configAPIURL = getEnv("CONFIG_API_URL", "https://api.conturs.com")
-	port         = getEnv("PORT", "8080")
+	config_api_url = get_env("CONFIG_API_URL", "https://api.conturs.com/config")
+	port           = get_env("PORT", "8082")
 )
 
-func getEnv(key, defaultVal string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
-	}
-	return defaultVal
+var default_weights = map[string]float64{
+	"lead_source":          0.10,
+	"days_since_created":   0.10,
+	"lead_status":          0.10,
+	"has_valid_email":      0.10,
+	"has_company_match":    0.15,
+	"engagement_score":     0.10,
+	"profile_completeness": 0.15,
+	"company_size_bucket":  0.10,
+	"industry_match":       0.05,
+	"recency_score":        0.05,
 }
 
-// ============================================================================
-// SCORING LOGIC
-// ============================================================================
-
-var weightLabels = map[string]string{
-	"lead_source":          "Lead Source",
-	"days_since_created":   "Recency",
-	"lead_status":          "Lead Status",
-	"has_email_valid":      "Valid Email",
-	"has_company_match":    "Company Match",
-	"engagement_score":     "Engagement",
-	"profile_completeness": "Profile Complete",
-	"company_size_bucket":  "Company Size",
-	"industry_match":       "Industry Match",
-	"recency_score":        "Activity Recency",
+func get_env(key, default_value string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return default_value
 }
 
-func calculateScore(lead Lead, weights map[string]float64) LeadScore {
-	var factors []ScoreFactor
-	totalScore := 0.0
+// Scoring logic
 
-	// 1. lead_source
-	if w, ok := weights["lead_source"]; ok && w > 0 {
-		value := 0.0
-		if lead.Email != "" {
-			value = 1.0
+func calculate_score(lead Lead, weights map[string]float64) Lead_score {
+	var factors []Score_factor
+	var total_score float64
+
+	add_factor := func(name string, weight, value float64) {
+		if weight <= 0 || value <= 0 {
+			return
 		}
-		contribution := value * w
-		totalScore += contribution
-		if value > 0 {
-			factors = append(factors, ScoreFactor{
-				Name:         weightLabels["lead_source"],
-				Weight:       w,
-				Value:        value,
-				Contribution: contribution,
-			})
+		contribution := value * weight
+		total_score += contribution
+		factors = append(factors, Score_factor{
+			Name:         name,
+			Weight:       weight,
+			Value:        value,
+			Contribution: contribution,
+		})
+	}
+
+	add_factor("Lead Source", weights["lead_source"], bool_to_float(lead.Email != ""))
+	add_factor("Valid Email", weights["has_valid_email"], bool_to_float(is_valid_email(lead.Email)))
+	add_factor("Company Match", weights["has_company_match"], bool_to_float(lead.Company != ""))
+	add_factor("Industry Match", weights["industry_match"], bool_to_float(lead.Industry != ""))
+
+	if lead.Create_date != "" {
+		if create_time, err := parse_date(lead.Create_date); err == nil {
+			days := int(time.Since(create_time).Hours() / 24)
+			value := math.Max(0, math.Min(1, 1-float64(days)/90))
+			add_factor("Recency", weights["days_since_created"], value)
 		}
 	}
 
-	// 2. days_since_created
-	if w, ok := weights["days_since_created"]; ok && w > 0 && lead.CreateDate != "" {
-		createTime, err := parseDate(lead.CreateDate)
-		if err == nil {
-			daysSinceCreated := int(time.Since(createTime).Hours() / 24)
-			value := math.Max(0, math.Min(1, 1-float64(daysSinceCreated)/90))
-			contribution := value * w
-			totalScore += contribution
-			factors = append(factors, ScoreFactor{
-				Name:         weightLabels["days_since_created"],
-				Weight:       w,
-				Value:        value,
-				Contribution: contribution,
-			})
-		}
-	}
-
-	// 3. lead_status
-	if w, ok := weights["lead_status"]; ok && w > 0 && lead.LeadStatus != "" {
-		statusScores := map[string]float64{
+	if lead.Lead_status != "" {
+		status_values := map[string]float64{
 			"new":         0.3,
 			"open":        0.5,
 			"in_progress": 0.7,
@@ -155,192 +163,68 @@ func calculateScore(lead Lead, weights map[string]float64) LeadScore {
 			"unqualified": 0.1,
 		}
 		value := 0.5
-		if v, ok := statusScores[strings.ToLower(lead.LeadStatus)]; ok {
+		if v, ok := status_values[strings.ToLower(lead.Lead_status)]; ok {
 			value = v
 		}
-		contribution := value * w
-		totalScore += contribution
-		factors = append(factors, ScoreFactor{
-			Name:         weightLabels["lead_status"],
-			Weight:       w,
-			Value:        value,
-			Contribution: contribution,
-		})
+		add_factor("Lead Status", weights["lead_status"], value)
 	}
 
-	// 4. has_email_valid
-	if w, ok := weights["has_email_valid"]; ok && w > 0 {
-		value := 0.0
-		if lead.Email != "" && strings.Contains(lead.Email, "@") {
-			value = 1.0
-		}
-		contribution := value * w
-		totalScore += contribution
-		if value > 0 {
-			factors = append(factors, ScoreFactor{
-				Name:         weightLabels["has_email_valid"],
-				Weight:       w,
-				Value:        value,
-				Contribution: contribution,
-			})
+	opens := float64(lead.Email_open_count)
+	clicks := float64(lead.Email_click_count)
+	engagement_value := math.Min(1, (opens/10)*0.4+(clicks/3)*0.6)
+	add_factor("Engagement", weights["engagement_score"], engagement_value)
+
+	profile_fields := []string{
+		lead.Email, lead.Firstname, lead.Lastname,
+		lead.Company, lead.Jobtitle, lead.Phone,
+		lead.City, lead.Country, lead.Industry,
+	}
+	filled_count := 0
+	for _, field := range profile_fields {
+		if field != "" {
+			filled_count++
 		}
 	}
+	profile_value := float64(filled_count) / float64(len(profile_fields))
+	add_factor("Profile Complete", weights["profile_completeness"], profile_value)
 
-	// 5. has_company_match
-	if w, ok := weights["has_company_match"]; ok && w > 0 {
-		value := 0.0
-		if lead.Company != "" {
-			value = 1.0
-		}
-		contribution := value * w
-		totalScore += contribution
-		if value > 0 {
-			factors = append(factors, ScoreFactor{
-				Name:         weightLabels["has_company_match"],
-				Weight:       w,
-				Value:        value,
-				Contribution: contribution,
-			})
-		}
-	}
-
-	// 6. engagement_score
-	if w, ok := weights["engagement_score"]; ok && w > 0 {
-		opens := float64(lead.EmailOpenCount)
-		clicks := float64(lead.EmailClickCount)
-		value := math.Min(1, (opens/10)*0.4+(clicks/3)*0.6)
-		contribution := value * w
-		totalScore += contribution
-		if value > 0 {
-			factors = append(factors, ScoreFactor{
-				Name:         weightLabels["engagement_score"],
-				Weight:       w,
-				Value:        value,
-				Contribution: contribution,
-			})
-		}
-	}
-
-	// 7. profile_completeness
-	if w, ok := weights["profile_completeness"]; ok && w > 0 {
-		fields := []string{
-			lead.Email, lead.Firstname, lead.Lastname,
-			lead.Company, lead.Jobtitle, lead.Phone,
-			lead.City, lead.Country, lead.Industry,
-		}
-		filledCount := 0
-		for _, f := range fields {
-			if f != "" {
-				filledCount++
-			}
-		}
-		value := float64(filledCount) / float64(len(fields))
-		contribution := value * w
-		totalScore += contribution
-		factors = append(factors, ScoreFactor{
-			Name:         weightLabels["profile_completeness"],
-			Weight:       w,
-			Value:        value,
-			Contribution: contribution,
-		})
-	}
-
-	// 8. company_size_bucket
-	if w, ok := weights["company_size_bucket"]; ok && w > 0 && lead.Jobtitle != "" {
+	if lead.Jobtitle != "" {
 		title := strings.ToLower(lead.Jobtitle)
-		value := 0.3
-		if strings.Contains(title, "ceo") || strings.Contains(title, "founder") || strings.Contains(title, "owner") {
-			value = 1.0
-		} else if strings.Contains(title, "director") || strings.Contains(title, "vp") || strings.Contains(title, "chief") {
-			value = 0.8
-		} else if strings.Contains(title, "manager") || strings.Contains(title, "head") {
-			value = 0.6
+		title_value := 0.3
+		switch {
+		case contains_any(title, "ceo", "founder", "owner"):
+			title_value = 1.0
+		case contains_any(title, "director", "vp", "chief"):
+			title_value = 0.8
+		case contains_any(title, "manager", "head"):
+			title_value = 0.6
 		}
-		contribution := value * w
-		totalScore += contribution
-		factors = append(factors, ScoreFactor{
-			Name:         weightLabels["company_size_bucket"],
-			Weight:       w,
-			Value:        value,
-			Contribution: contribution,
-		})
+		add_factor("Company Size", weights["company_size_bucket"], title_value)
 	}
 
-	// 9. industry_match
-	if w, ok := weights["industry_match"]; ok && w > 0 {
-		value := 0.0
-		if lead.Industry != "" {
-			value = 1.0
-		}
-		contribution := value * w
-		totalScore += contribution
-		if value > 0 {
-			factors = append(factors, ScoreFactor{
-				Name:         weightLabels["industry_match"],
-				Weight:       w,
-				Value:        value,
-				Contribution: contribution,
-			})
-		}
-	}
-
-	// 10. recency_score
-	if w, ok := weights["recency_score"]; ok && w > 0 {
-		hasDeals := lead.NumDeals > 0
-		hasRecentNotes := false
-		if lead.NotesLastUpdated != "" {
-			if notesTime, err := parseDate(lead.NotesLastUpdated); err == nil {
-				hasRecentNotes = time.Since(notesTime).Hours() < 30*24
+	recency_value := 0.2
+	if lead.Num_deals > 0 {
+		recency_value = 0.7
+	} else if lead.Notes_last_update != "" {
+		if notes_time, err := parse_date(lead.Notes_last_update); err == nil {
+			if time.Since(notes_time).Hours() < 30*24 {
+				recency_value = 0.5
 			}
 		}
-		value := 0.2
-		if hasDeals {
-			value = 0.7
-		} else if hasRecentNotes {
-			value = 0.5
-		}
-		contribution := value * w
-		totalScore += contribution
-		factors = append(factors, ScoreFactor{
-			Name:         weightLabels["recency_score"],
-			Weight:       w,
-			Value:        value,
-			Contribution: contribution,
-		})
 	}
+	add_factor("Activity Recency", weights["recency_score"], recency_value)
 
-	score := int(math.Round(math.Min(100, math.Max(0, totalScore*100))))
+	score := int(math.Round(clamp(total_score*100, 0, 100)))
 
-	return LeadScore{
+	return Lead_score{
 		Email:   lead.Email,
 		Score:   score,
-		Label:   getScoreLabel(score),
+		Label:   get_score_label(score),
 		Factors: factors,
 	}
 }
 
-func parseDate(dateStr string) (time.Time, error) {
-	if !strings.Contains(dateStr, "-") {
-		var ts int64
-		if _, err := fmt.Sscanf(dateStr, "%d", &ts); err == nil {
-			return time.UnixMilli(ts), nil
-		}
-	}
-	formats := []string{
-		time.RFC3339,
-		"2006-01-02T15:04:05Z",
-		"2006-01-02",
-		"2006/01/02",
-	}
-	for _, format := range formats {
-		if t, err := time.Parse(format, dateStr); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("unable to parse date: %s", dateStr)
-}
-
-func getScoreLabel(score int) string {
+func get_score_label(score int) string {
 	switch {
 	case score >= 80:
 		return "Hot Lead"
@@ -353,14 +237,68 @@ func getScoreLabel(score int) string {
 	}
 }
 
-// ============================================================================
-// API CLIENT
-// ============================================================================
+// Helper functions
 
-func fetchConfig(email, apiKey string) (*ConfigResponse, error) {
-	reqBody, _ := json.Marshal(map[string]string{"email": email, "api_key": apiKey})
+func bool_to_float(b bool) float64 {
+	if b {
+		return 1.0
+	}
+	return 0.0
+}
 
-	resp, err := http.Post(configAPIURL+"/config", "application/json", bytes.NewBuffer(reqBody))
+func is_valid_email(email string) bool {
+	return email != "" && strings.Contains(email, "@")
+}
+
+func contains_any(s string, substrings ...string) bool {
+	for _, sub := range substrings {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func clamp(value, min, max float64) float64 {
+	return math.Max(min, math.Min(max, value))
+}
+
+func parse_date(date_str string) (time.Time, error) {
+	if !strings.Contains(date_str, "-") {
+		var timestamp int64
+		if _, err := fmt.Sscanf(date_str, "%d", &timestamp); err == nil {
+			return time.UnixMilli(timestamp), nil
+		}
+	}
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05Z",
+		"2006-01-02",
+		"2006/01/02",
+	}
+	for _, format := range formats {
+		if t, err := time.Parse(format, date_str); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unable to parse date: %s", date_str)
+}
+
+func get_string_prop(props map[string]any, key string) string {
+	if value, ok := props[key]; ok {
+		if str, ok := value.(string); ok {
+			return str
+		}
+	}
+	return ""
+}
+
+// API client
+
+func fetch_config(email, api_key string) (*Config_response, error) {
+	body, _ := json.Marshal(map[string]string{"email": email, "api_key": api_key})
+
+	resp, err := http.Post(config_api_url+"/config", "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		return nil, fmt.Errorf("fetch config: %w", err)
 	}
@@ -371,11 +309,11 @@ func fetchConfig(email, apiKey string) (*ConfigResponse, error) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("config API error %d: %s", resp.StatusCode, string(body))
+		resp_body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("config API error %d: %s", resp.StatusCode, string(resp_body))
 	}
 
-	var config ConfigResponse
+	var config Config_response
 	if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
@@ -383,21 +321,19 @@ func fetchConfig(email, apiKey string) (*ConfigResponse, error) {
 	return &config, nil
 }
 
-// ============================================================================
-// HANDLERS
-// ============================================================================
+// HTTP helpers
 
-func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+func write_json(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(data)
 }
 
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, ErrorResponse{Error: message})
+func write_error(w http.ResponseWriter, status int, message string) {
+	write_json(w, status, Error_response{Error: message})
 }
 
-func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+func cors_middleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -411,76 +347,121 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
+// Handlers
+
+func health_handler(w http.ResponseWriter, r *http.Request) {
+	write_json(w, http.StatusOK, map[string]string{
 		"status":  "healthy",
 		"service": "scoring-service",
 	})
 }
 
-func leadsHandler(w http.ResponseWriter, r *http.Request) {
+func leads_handler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		write_error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	var req LeadsRequest
+	var req Leads_request
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
+		write_error(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 		return
 	}
 
-	// Validate required fields
-	if req.APIKey == "" || req.Email == "" {
-		writeError(w, http.StatusUnauthorized, "api_key and email required")
+	if req.Api_key == "" || req.Email == "" {
+		write_error(w, http.StatusUnauthorized, "api_key and email required")
 		return
 	}
 
 	if len(req.Leads) == 0 {
-		writeError(w, http.StatusBadRequest, "No leads provided")
+		write_error(w, http.StatusBadRequest, "No leads provided")
 		return
 	}
 
-	// Use validated email for config
-	configEmail := req.Email
-	if req.ClientID != "" {
-		configEmail = req.ClientID
+	config_email := req.Email
+	if req.Client_id != "" {
+		config_email = req.Client_id
 	}
 
-	config, err := fetchConfig(configEmail, req.APIKey)
+	config, err := fetch_config(config_email, req.Api_key)
 	if err != nil {
 		log.Printf("Failed to fetch config: %v", err)
 		if strings.Contains(err.Error(), "unauthorized") {
-			writeError(w, http.StatusUnauthorized, "Invalid API key")
+			write_error(w, http.StatusUnauthorized, "Invalid API key")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "Failed to fetch scoring config")
+		write_error(w, http.StatusInternalServerError, "Failed to fetch scoring config")
 		return
 	}
 
-	var scores []LeadScore
+	var scores []Lead_score
 	for _, lead := range req.Leads {
-		scores = append(scores, calculateScore(lead, config.Weights))
+		scores = append(scores, calculate_score(lead, config.Weights))
 	}
 
-	writeJSON(w, http.StatusOK, LeadsResponse{
-		Scores:   scores,
-		Method:   config.Method,
-		ClientID: config.ClientID,
+	write_json(w, http.StatusOK, Leads_response{
+		Scores:    scores,
+		Method:    config.Method,
+		Client_id: config.Client_id,
 	})
 }
 
-// ============================================================================
-// MAIN
-// ============================================================================
+func workflow_handler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		write_error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req Workflow_request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Workflow decode error: %v", err)
+		write_json(w, http.StatusOK, Workflow_response{
+			Output_fields: map[string]any{"score": 0, "status": "error: invalid request"},
+		})
+		return
+	}
+
+	log.Printf("Workflow request: portal_id=%d, object_id=%d", req.Origin.Portal_id, req.Object.Object_id)
+
+	props := req.Object.Properties
+	email := get_string_prop(props, "email")
+
+	if email == "" {
+		write_json(w, http.StatusOK, Workflow_response{
+			Output_fields: map[string]any{"score": 0, "status": "error: no email"},
+		})
+		return
+	}
+
+	lead := Lead{
+		Email:     email,
+		Firstname: get_string_prop(props, "firstname"),
+		Lastname:  get_string_prop(props, "lastname"),
+		Company:   get_string_prop(props, "company"),
+		Jobtitle:  get_string_prop(props, "jobtitle"),
+		Industry:  get_string_prop(props, "industry"),
+		Phone:     get_string_prop(props, "phone"),
+		City:      get_string_prop(props, "city"),
+		Country:   get_string_prop(props, "country"),
+	}
+
+	result := calculate_score(lead, default_weights)
+
+	write_json(w, http.StatusOK, Workflow_response{
+		Output_fields: map[string]any{"score": result.Score, "status": "success"},
+	})
+}
+
+// Main
 
 func main() {
-	http.HandleFunc("/health", corsMiddleware(healthHandler))
-	http.HandleFunc("/leads", corsMiddleware(leadsHandler))
+	http.HandleFunc("/health", cors_middleware(health_handler))
+	http.HandleFunc("/leads", cors_middleware(leads_handler))
+	http.HandleFunc("/workflow", cors_middleware(workflow_handler))
 
 	addr := ":" + port
 	log.Printf("Scoring service starting on %s", addr)
-	log.Printf("Config API: %s", configAPIURL)
+	log.Printf("Config API: %s", config_api_url)
 
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal("Server failed:", err)
