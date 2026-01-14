@@ -97,7 +97,7 @@ type Workflow_response struct {
 // Config
 
 var (
-	config_api_url = get_env("CONFIG_API_URL", "https://api.conturs.com/config")
+	config_api_url = get_env("CONFIG_API_URL", "https://api.conturs.com")
 	port           = get_env("PORT", "8082")
 )
 

@@ -137,7 +137,7 @@ Health check endpoint.
 
 | variable | default | description |
 |----------|---------|-------------|
-| `CONFIG_API_URL` | `https://api.conturs.com/config` | config api url |
+| `CONFIG_API_URL` | `https://api.conturs.com` | config api url |
 | `PORT` | `8082` | service port |
 
 ## Run
