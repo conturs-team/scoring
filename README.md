@@ -6,7 +6,7 @@ Lead scoring microservice built with Go. No external dependencies (stdlib only).
 
 ### POST /leads
 
-Score an array of leads.
+Batch score an array of leads.
 
 **Request:**
 ```json
@@ -61,40 +61,6 @@ Score an array of leads.
 curl -X POST http://localhost:8082/leads \
   -H "Content-Type: application/json" \
   -d '{"leads":[{"email":"john@example.com"}],"api_key":"key","email":"you@email.com"}'
-```
-
-### POST /workflow
-
-HubSpot workflow integration endpoint.
-
-**Request:**
-```json
-{
-  "origin": {
-    "portalId": 123456,
-    "actionDefinitionId": "abc123"
-  },
-  "object": {
-    "objectId": 789,
-    "objectType": "contact",
-    "properties": {
-      "email": "john@example.com",
-      "firstname": "John",
-      "lastname": "Doe",
-      "company": "Acme Inc"
-    }
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "outputFields": {
-    "score": 85,
-    "status": "success"
-  }
-}
 ```
 
 ### GET /health

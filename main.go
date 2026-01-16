@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -71,48 +72,12 @@ type Error_response struct {
 	Error string `json:"error"`
 }
 
-// HubSpot workflow types
-
-type Workflow_request struct {
-	Origin       Workflow_origin `json:"origin"`
-	Object       Workflow_object `json:"object"`
-	Input_fields map[string]any  `json:"inputFields"`
-}
-
-type Workflow_origin struct {
-	Portal_id            int    `json:"portalId"`
-	Action_definition_id string `json:"actionDefinitionId"`
-}
-
-type Workflow_object struct {
-	Object_id   int            `json:"objectId"`
-	Object_type string         `json:"objectType"`
-	Properties  map[string]any `json:"properties"`
-}
-
-type Workflow_response struct {
-	Output_fields map[string]any `json:"outputFields"`
-}
-
 // Config
 
 var (
 	config_api_url = get_env("CONFIG_API_URL", "https://api.conturs.com")
 	port           = get_env("PORT", "8082")
 )
-
-var default_weights = map[string]float64{
-	"lead_source":          0.10,
-	"days_since_created":   0.10,
-	"lead_status":          0.10,
-	"has_valid_email":      0.10,
-	"has_company_match":    0.15,
-	"engagement_score":     0.10,
-	"profile_completeness": 0.15,
-	"company_size_bucket":  0.10,
-	"industry_match":       0.05,
-	"recency_score":        0.05,
-}
 
 func get_env(key, default_value string) string {
 	if value := os.Getenv(key); value != "" {
@@ -284,15 +249,6 @@ func parse_date(date_str string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse date: %s", date_str)
 }
 
-func get_string_prop(props map[string]any, key string) string {
-	if value, ok := props[key]; ok {
-		if str, ok := value.(string); ok {
-			return str
-		}
-	}
-	return ""
-}
-
 // API client
 
 func fetch_config(email, api_key string) (*Config_response, error) {
@@ -333,11 +289,23 @@ func write_error(w http.ResponseWriter, status int, message string) {
 	write_json(w, status, Error_response{Error: message})
 }
 
+var allowed_origins = []string{
+	"https://conturs.com",
+	"https://www.conturs.com",
+	"https://app.conturs.com",
+}
+
 func cors_middleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+
+		if slices.Contains(allowed_origins, origin) {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)
@@ -406,58 +374,11 @@ func leads_handler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func workflow_handler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		write_error(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	var req Workflow_request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("Workflow decode error: %v", err)
-		write_json(w, http.StatusOK, Workflow_response{
-			Output_fields: map[string]any{"score": 0, "status": "error: invalid request"},
-		})
-		return
-	}
-
-	log.Printf("Workflow request: portal_id=%d, object_id=%d", req.Origin.Portal_id, req.Object.Object_id)
-
-	props := req.Object.Properties
-	email := get_string_prop(props, "email")
-
-	if email == "" {
-		write_json(w, http.StatusOK, Workflow_response{
-			Output_fields: map[string]any{"score": 0, "status": "error: no email"},
-		})
-		return
-	}
-
-	lead := Lead{
-		Email:     email,
-		Firstname: get_string_prop(props, "firstname"),
-		Lastname:  get_string_prop(props, "lastname"),
-		Company:   get_string_prop(props, "company"),
-		Jobtitle:  get_string_prop(props, "jobtitle"),
-		Industry:  get_string_prop(props, "industry"),
-		Phone:     get_string_prop(props, "phone"),
-		City:      get_string_prop(props, "city"),
-		Country:   get_string_prop(props, "country"),
-	}
-
-	result := calculate_score(lead, default_weights)
-
-	write_json(w, http.StatusOK, Workflow_response{
-		Output_fields: map[string]any{"score": result.Score, "status": "success"},
-	})
-}
-
 // Main
 
 func main() {
 	http.HandleFunc("/health", cors_middleware(health_handler))
 	http.HandleFunc("/leads", cors_middleware(leads_handler))
-	http.HandleFunc("/workflow", cors_middleware(workflow_handler))
 
 	addr := ":" + port
 	log.Printf("Scoring service starting on %s", addr)
