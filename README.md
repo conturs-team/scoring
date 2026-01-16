@@ -2,21 +2,176 @@
 
 Lead scoring microservice written in Go. Zero external dependencies - stdlib only.
 
-## How It Works
+---
+
+## What is Conturs?
+
+Conturs is a **personalized lead scoring system** that generates customized scoring weights for each client instead of using one-size-fits-all rules.
+
+### The Problem
+
+Traditional lead scoring systems use fixed rules:
+- "CEO = +50 points"
+- "Enterprise company = +30 points"
+- "Email opened = +10 points"
+
+But these rules don't work equally for everyone:
+- A B2B SaaS company cares more about engagement metrics
+- A recruitment agency prioritizes job title seniority
+- An e-commerce business focuses on recency and activity
+
+### The Solution
+
+Conturs learns from successful conversions of **similar clients** to generate personalized weights:
 
 ```
-┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐
-│   Client    │───────▶│ Scoring Service  │────────▶│  Config API     │
-│             │         │   POST /leads    │         │  POST /config   │
-│             │◀───────│                  │◀────────│                 │
-└─────────────┘         └──────────────────┘         └─────────────────┘
-     leads[]                  scores[]                   weights{}
+Your Business Profile          Similar Successful Clients         Your Personalized Weights
+─────────────────────    →    ──────────────────────────    →    ────────────────────────
+• SaaS / Technology           • Client A: engagement=0.20        • engagement_score: 0.18
+• 50 employees                • Client B: engagement=0.15        • profile_completeness: 0.14
+• B2B sales                   • Client C: engagement=0.18        • company_size: 0.12
+                                                                  • ...
 ```
 
-1. Client sends leads array to Scoring Service
-2. Scoring Service fetches personalized weights from Config API
-3. Each lead is scored using the weights
-4. Scores with breakdown are returned
+---
+
+## System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              CONTURS SYSTEM                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│   Config    │      │    Scoring      │      │   Your CRM      │
+│    API      │      │    Service      │      │   (HubSpot,     │
+│             │      │   (this repo)   │      │    Salesforce)  │
+└──────┬──────┘      └────────┬────────┘      └────────┬────────┘
+       │                      │                        │
+       │  weights{}           │  scores[]              │  leads[]
+       │                      │                        │
+       └──────────────────────┼────────────────────────┘
+                              │
+                    ┌─────────▼─────────┐
+                    │   Your Workflow   │
+                    │   (n8n, Zapier,   │
+                    │    custom code)   │
+                    └───────────────────┘
+```
+
+### Config API (`api.conturs.com`)
+
+The brain of the system:
+
+- **Profile Enrichment** — Automatically enriches your business profile based on email (industry, company size, job title, skills)
+- **Vector Similarity Search** — Finds clients similar to you using ML embeddings
+- **Weight Generation** — Creates personalized scoring weights based on what worked for similar clients
+- **Feedback Loop** — Collects conversion data to continuously improve recommendations
+
+### Scoring Service (this repository)
+
+Lightweight scoring engine:
+
+- **Single Binary** — One Go executable, ~10MB, no dependencies
+- **Batch Processing** — Score hundreds of leads in one request
+- **Transparent Scoring** — Full breakdown of how each score was calculated
+- **Offline Capable** — Falls back to default weights if Config API is unavailable
+
+---
+
+## How Scoring Works
+
+### Step 1: Register Your Account
+
+First, register with the Config API to get personalized weights:
+
+```bash
+curl -X POST https://api.conturs.com/config \
+  -H "Content-Type: application/json" \
+  -d '{"email": "sales@yourcompany.com"}'
+```
+
+Response:
+```json
+{
+  "client_id": "12345",
+  "weights": {
+    "lead_source": 0.10,
+    "engagement_score": 0.18,
+    "profile_completeness": 0.14,
+    ...
+  },
+  "method": "similar_clients",
+  "is_new_client": true
+}
+```
+
+The `method` field tells you how weights were generated:
+- `similar_clients` — Based on similar successful businesses (best)
+- `industry_prior` — Based on your industry defaults (good)
+- `default` — Generic weights (fallback)
+
+### Step 2: Score Your Leads
+
+Send leads to the Scoring Service:
+
+```bash
+curl -X POST https://scoring.conturs.com/leads \
+  -H "Content-Type: application/json" \
+  -d '{
+    "leads": [...],
+    "api_key": "sk_your_api_key",
+    "email": "sales@yourcompany.com"
+  }'
+```
+
+The service:
+1. Fetches your personalized weights from Config API
+2. Calculates score for each lead using weighted formula
+3. Returns scores with full factor breakdown
+
+### Step 3: Send Feedback (Optional)
+
+Improve recommendations by reporting outcomes:
+
+```bash
+curl -X POST https://api.conturs.com/feedback \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_id": "12345",
+    "lead_id": "lead_001",
+    "action": "converted"
+  }'
+```
+
+Actions and their rewards:
+| Action | Reward | Meaning |
+|--------|--------|---------|
+| `converted` | +1.0 | Lead became a customer |
+| `replied` | +0.5 | Lead responded positively |
+| `clicked` | +0.2 | Lead engaged with content |
+| `ignored` | -0.5 | Lead didn't respond |
+| `bounced` | -1.0 | Invalid contact |
+
+Feedback improves weight recommendations for **all similar clients** — the more feedback in the system, the better everyone's scoring becomes.
+
+---
+
+## Why Self-Hosted?
+
+The Scoring Service is designed to run on your infrastructure:
+
+| Benefit | Description |
+|---------|-------------|
+| **Speed** | No network latency — scoring happens locally in microseconds |
+| **Privacy** | Lead PII never leaves your servers |
+| **Reliability** | Works offline with cached/default weights |
+| **Cost** | No per-lead pricing — score unlimited leads |
+| **Compliance** | Easier GDPR/SOC2 compliance when data stays internal |
+
+Config API is only called **once per session** to fetch weights. All scoring calculations happen locally.
+
+---
 
 ## Quick Start
 
@@ -513,6 +668,310 @@ GOOS=linux GOARCH=amd64 go build -o scoring main.go
 ```bash
 docker build -t conturs-scoring .
 docker run -p 8082:8082 -e CONFIG_API_URL=https://api.conturs.com conturs-scoring
+```
+
+---
+
+## SDK Examples
+
+### Python
+
+```python
+import requests
+
+def score_leads(leads: list, api_key: str, email: str, base_url: str = "https://scoring.conturs.com") -> dict:
+    """Score a batch of leads."""
+    response = requests.post(
+        f"{base_url}/leads",
+        json={
+            "leads": leads,
+            "api_key": api_key,
+            "email": email
+        },
+        headers={"Content-Type": "application/json"}
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+# Example usage
+leads = [
+    {
+        "email": "john.doe@techcorp.com",
+        "firstname": "John",
+        "lastname": "Doe",
+        "company": "TechCorp Inc",
+        "jobtitle": "CEO",
+        "industry": "Technology",
+        "lead_status": "qualified",
+        "email_open_count": 12,
+        "email_click_count": 5
+    },
+    {
+        "email": "jane@startup.io",
+        "company": "Startup.io",
+        "jobtitle": "Marketing Manager"
+    }
+]
+
+result = score_leads(
+    leads=leads,
+    api_key="sk_your_api_key",
+    email="sales@yourcompany.com"
+)
+
+for score in result["scores"]:
+    print(f"{score['email']}: {score['score']} ({score['label']})")
+
+# Output:
+# john.doe@techcorp.com: 87 (Hot Lead)
+# jane@startup.io: 48 (Cool Lead)
+```
+
+---
+
+### JavaScript / Node.js
+
+```javascript
+async function scoreLeads(leads, apiKey, email, baseUrl = 'https://scoring.conturs.com') {
+  const response = await fetch(`${baseUrl}/leads`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      leads,
+      api_key: apiKey,
+      email,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to score leads');
+  }
+
+  return response.json();
+}
+
+
+// Example usage
+const leads = [
+  {
+    email: 'john.doe@techcorp.com',
+    firstname: 'John',
+    lastname: 'Doe',
+    company: 'TechCorp Inc',
+    jobtitle: 'CEO',
+    industry: 'Technology',
+    lead_status: 'qualified',
+    email_open_count: 12,
+    email_click_count: 5,
+  },
+  {
+    email: 'jane@startup.io',
+    company: 'Startup.io',
+    jobtitle: 'Marketing Manager',
+  },
+];
+
+scoreLeads(leads, 'sk_your_api_key', 'sales@yourcompany.com')
+  .then((result) => {
+    result.scores.forEach((score) => {
+      console.log(`${score.email}: ${score.score} (${score.label})`);
+    });
+  })
+  .catch(console.error);
+
+// Output:
+// john.doe@techcorp.com: 87 (Hot Lead)
+// jane@startup.io: 48 (Cool Lead)
+```
+
+---
+
+### PHP
+
+```php
+<?php
+
+function scoreLeads(array $leads, string $apiKey, string $email, string $baseUrl = 'https://scoring.conturs.com'): array
+{
+    $payload = json_encode([
+        'leads' => $leads,
+        'api_key' => $apiKey,
+        'email' => $email,
+    ]);
+
+    $ch = curl_init("{$baseUrl}/leads");
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Content-Length: ' . strlen($payload),
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+    ]);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($httpCode !== 200) {
+        $error = json_decode($response, true);
+        throw new Exception($error['error'] ?? 'Failed to score leads');
+    }
+
+    return json_decode($response, true);
+}
+
+
+// Example usage
+$leads = [
+    [
+        'email' => 'john.doe@techcorp.com',
+        'firstname' => 'John',
+        'lastname' => 'Doe',
+        'company' => 'TechCorp Inc',
+        'jobtitle' => 'CEO',
+        'industry' => 'Technology',
+        'lead_status' => 'qualified',
+        'email_open_count' => 12,
+        'email_click_count' => 5,
+    ],
+    [
+        'email' => 'jane@startup.io',
+        'company' => 'Startup.io',
+        'jobtitle' => 'Marketing Manager',
+    ],
+];
+
+try {
+    $result = scoreLeads($leads, 'sk_your_api_key', 'sales@yourcompany.com');
+
+    foreach ($result['scores'] as $score) {
+        echo "{$score['email']}: {$score['score']} ({$score['label']})\n";
+    }
+} catch (Exception $e) {
+    echo "Error: " . $e->getMessage() . "\n";
+}
+
+// Output:
+// john.doe@techcorp.com: 87 (Hot Lead)
+// jane@startup.io: 48 (Cool Lead)
+```
+
+---
+
+### Java
+
+```java
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+
+public class ContursScoring {
+
+    private final String baseUrl;
+    private final String apiKey;
+    private final String email;
+    private final HttpClient client;
+    private final Gson gson;
+
+    public ContursScoring(String apiKey, String email) {
+        this(apiKey, email, "https://scoring.conturs.com");
+    }
+
+    public ContursScoring(String apiKey, String email, String baseUrl) {
+        this.apiKey = apiKey;
+        this.email = email;
+        this.baseUrl = baseUrl;
+        this.client = HttpClient.newHttpClient();
+        this.gson = new Gson();
+    }
+
+    public JsonObject scoreLeads(JsonArray leads) throws Exception {
+        JsonObject payload = new JsonObject();
+        payload.add("leads", leads);
+        payload.addProperty("api_key", apiKey);
+        payload.addProperty("email", email);
+
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(baseUrl + "/leads"))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(payload)))
+            .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            JsonObject error = gson.fromJson(response.body(), JsonObject.class);
+            throw new Exception(error.has("error") ? error.get("error").getAsString() : "Failed to score leads");
+        }
+
+        return gson.fromJson(response.body(), JsonObject.class);
+    }
+
+    public static void main(String[] args) {
+        try {
+            ContursScoring scoring = new ContursScoring("sk_your_api_key", "sales@yourcompany.com");
+
+            JsonArray leads = new JsonArray();
+
+            JsonObject lead1 = new JsonObject();
+            lead1.addProperty("email", "john.doe@techcorp.com");
+            lead1.addProperty("firstname", "John");
+            lead1.addProperty("lastname", "Doe");
+            lead1.addProperty("company", "TechCorp Inc");
+            lead1.addProperty("jobtitle", "CEO");
+            lead1.addProperty("industry", "Technology");
+            lead1.addProperty("lead_status", "qualified");
+            lead1.addProperty("email_open_count", 12);
+            lead1.addProperty("email_click_count", 5);
+            leads.add(lead1);
+
+            JsonObject lead2 = new JsonObject();
+            lead2.addProperty("email", "jane@startup.io");
+            lead2.addProperty("company", "Startup.io");
+            lead2.addProperty("jobtitle", "Marketing Manager");
+            leads.add(lead2);
+
+            JsonObject result = scoring.scoreLeads(leads);
+            JsonArray scores = result.getAsJsonArray("scores");
+
+            for (int i = 0; i < scores.size(); i++) {
+                JsonObject score = scores.get(i).getAsJsonObject();
+                System.out.printf("%s: %d (%s)%n",
+                    score.get("email").getAsString(),
+                    score.get("score").getAsInt(),
+                    score.get("label").getAsString()
+                );
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+        }
+    }
+}
+
+// Output:
+// john.doe@techcorp.com: 87 (Hot Lead)
+// jane@startup.io: 48 (Cool Lead)
+```
+
+**Maven dependency for Gson:**
+
+```xml
+<dependency>
+    <groupId>com.google.code.gson</groupId>
+    <artifactId>gson</artifactId>
+    <version>2.10.1</version>
+</dependency>
 ```
 
 ---
