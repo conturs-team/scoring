@@ -6,9 +6,9 @@ Lead scoring microservice written in Go. Zero external dependencies - stdlib onl
 
 ```
 ┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐
-│   Client    │────────▶│ Scoring Service  │────────▶│  Config API     │
+│   Client    │───────▶│ Scoring Service  │────────▶│  Config API     │
 │             │         │   POST /leads    │         │  POST /config   │
-│             │◀────────│                  │◀────────│                 │
+│             │◀───────│                  │◀────────│                 │
 └─────────────┘         └──────────────────┘         └─────────────────┘
      leads[]                  scores[]                   weights{}
 ```
