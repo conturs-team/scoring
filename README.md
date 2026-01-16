@@ -43,9 +43,9 @@ Your Business Profile          Similar Successful Clients         Your Personali
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│   Config    │      │    Scoring      │      │   Your CRM      │
-│    API      │      │    Service      │      │   (HubSpot,     │
-│             │      │   (this repo)   │      │    Salesforce)  │
+│   Config    │      │    Scoring      │      │   Your CRM /    │
+│    API      │      │    Service      │      │   Data Source   │
+│             │      │   (this repo)   │      │                 │
 └──────┬──────┘      └────────┬────────┘      └────────┬────────┘
        │                      │                        │
        │  weights{}           │  scores[]              │  leads[]
@@ -208,10 +208,10 @@ Score a batch of leads.
 | Field | Type | Description |
 |-------|------|-------------|
 | `email` | string | Lead's email address |
-| `firstname` | string | First name |
-| `lastname` | string | Last name |
+| `first_name` | string | First name |
+| `last_name` | string | Last name |
 | `company` | string | Company name |
-| `jobtitle` | string | Job title (used for seniority scoring) |
+| `job_title` | string | Job title (used for seniority scoring) |
 | `industry` | string | Industry/sector |
 | `phone` | string | Phone number |
 | `city` | string | City |
@@ -233,10 +233,10 @@ curl -X POST http://localhost:8082/leads \
     "leads": [
       {
         "email": "john.doe@techcorp.com",
-        "firstname": "John",
-        "lastname": "Doe",
+        "first_name": "John",
+        "last_name": "Doe",
         "company": "TechCorp Inc",
-        "jobtitle": "CEO",
+        "job_title": "CEO",
         "industry": "Technology",
         "phone": "+1-555-123-4567",
         "city": "San Francisco",
@@ -251,7 +251,7 @@ curl -X POST http://localhost:8082/leads \
       {
         "email": "jane@startup.io",
         "company": "Startup.io",
-        "jobtitle": "Marketing Manager",
+        "job_title": "Marketing Manager",
         "lead_status": "open",
         "email_open_count": 3
       }
@@ -533,7 +533,7 @@ value = min(1, (opens/10 × 0.4) + (clicks/3 × 0.6))
 
 Percentage of filled profile fields.
 
-Fields counted: email, firstname, lastname, company, jobtitle, phone, city, country, industry
+Fields counted: email, first_name, last_name, company, job_title, phone, city, country, industry
 
 ```
 value = filled_fields / 9
@@ -698,10 +698,10 @@ def score_leads(leads: list, api_key: str, email: str, base_url: str = "https://
 leads = [
     {
         "email": "john.doe@techcorp.com",
-        "firstname": "John",
-        "lastname": "Doe",
+        "first_name": "John",
+        "last_name": "Doe",
         "company": "TechCorp Inc",
-        "jobtitle": "CEO",
+        "job_title": "CEO",
         "industry": "Technology",
         "lead_status": "qualified",
         "email_open_count": 12,
@@ -710,7 +710,7 @@ leads = [
     {
         "email": "jane@startup.io",
         "company": "Startup.io",
-        "jobtitle": "Marketing Manager"
+        "job_title": "Marketing Manager"
     }
 ]
 
@@ -759,10 +759,10 @@ async function scoreLeads(leads, apiKey, email, baseUrl = 'https://scoring.contu
 const leads = [
   {
     email: 'john.doe@techcorp.com',
-    firstname: 'John',
-    lastname: 'Doe',
+    first_name: 'John',
+    last_name: 'Doe',
     company: 'TechCorp Inc',
-    jobtitle: 'CEO',
+    job_title: 'CEO',
     industry: 'Technology',
     lead_status: 'qualified',
     email_open_count: 12,
@@ -771,7 +771,7 @@ const leads = [
   {
     email: 'jane@startup.io',
     company: 'Startup.io',
-    jobtitle: 'Marketing Manager',
+    job_title: 'Marketing Manager',
   },
 ];
 
@@ -831,10 +831,10 @@ function scoreLeads(array $leads, string $apiKey, string $email, string $baseUrl
 $leads = [
     [
         'email' => 'john.doe@techcorp.com',
-        'firstname' => 'John',
-        'lastname' => 'Doe',
+        'first_name' => 'John',
+        'last_name' => 'Doe',
         'company' => 'TechCorp Inc',
-        'jobtitle' => 'CEO',
+        'job_title' => 'CEO',
         'industry' => 'Technology',
         'lead_status' => 'qualified',
         'email_open_count' => 12,
@@ -843,7 +843,7 @@ $leads = [
     [
         'email' => 'jane@startup.io',
         'company' => 'Startup.io',
-        'jobtitle' => 'Marketing Manager',
+        'job_title' => 'Marketing Manager',
     ],
 ];
 
@@ -925,10 +925,10 @@ public class ContursScoring {
 
             JsonObject lead1 = new JsonObject();
             lead1.addProperty("email", "john.doe@techcorp.com");
-            lead1.addProperty("firstname", "John");
-            lead1.addProperty("lastname", "Doe");
+            lead1.addProperty("first_name", "John");
+            lead1.addProperty("last_name", "Doe");
             lead1.addProperty("company", "TechCorp Inc");
-            lead1.addProperty("jobtitle", "CEO");
+            lead1.addProperty("job_title", "CEO");
             lead1.addProperty("industry", "Technology");
             lead1.addProperty("lead_status", "qualified");
             lead1.addProperty("email_open_count", 12);
@@ -938,7 +938,7 @@ public class ContursScoring {
             JsonObject lead2 = new JsonObject();
             lead2.addProperty("email", "jane@startup.io");
             lead2.addProperty("company", "Startup.io");
-            lead2.addProperty("jobtitle", "Marketing Manager");
+            lead2.addProperty("job_title", "Marketing Manager");
             leads.add(lead2);
 
             JsonObject result = scoring.scoreLeads(leads);
