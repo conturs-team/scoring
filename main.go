@@ -9,7 +9,6 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"slices"
 	"strings"
 	"time"
 )
@@ -289,31 +288,6 @@ func write_error(w http.ResponseWriter, status int, message string) {
 	write_json(w, status, Error_response{Error: message})
 }
 
-var allowed_origins = []string{
-	"https://conturs.com",
-	"https://www.conturs.com",
-	"https://app.conturs.com",
-}
-
-func cors_middleware(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-
-		if slices.Contains(allowed_origins, origin) {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-		}
-
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next(w, r)
-	}
-}
 
 // Handlers
 
@@ -377,8 +351,8 @@ func leads_handler(w http.ResponseWriter, r *http.Request) {
 // Main
 
 func main() {
-	http.HandleFunc("/health", cors_middleware(health_handler))
-	http.HandleFunc("/leads", cors_middleware(leads_handler))
+	http.HandleFunc("/health", health_handler)
+	http.HandleFunc("/leads", leads_handler)
 
 	addr := ":" + port
 	log.Printf("Scoring service starting on %s", addr)
