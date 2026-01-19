@@ -1,0 +1,6 @@
+*.exe
+scoring
+.git
+.gitignore
+README.md
+LICENSE
