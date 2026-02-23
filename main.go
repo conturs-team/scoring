@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,22 +15,22 @@ import (
 // Request and response types
 
 type Lead struct {
-	Email             string  `json:"email"`
-	Firstname         string  `json:"firstname,omitempty"`
-	Lastname          string  `json:"lastname,omitempty"`
-	Company           string  `json:"company,omitempty"`
-	Jobtitle          string  `json:"jobtitle,omitempty"`
-	Industry          string  `json:"industry,omitempty"`
-	Phone             string  `json:"phone,omitempty"`
-	City              string  `json:"city,omitempty"`
-	Country           string  `json:"country,omitempty"`
-	Lead_status       string  `json:"lead_status,omitempty"`
-	Email_open_count  int     `json:"email_open_count,omitempty"`
-	Email_click_count int     `json:"email_click_count,omitempty"`
-	Num_deals         int     `json:"num_deals,omitempty"`
-	Deal_amount       float64 `json:"deal_amount,omitempty"`
-	Create_date       string  `json:"create_date,omitempty"`
-	Notes_last_update string  `json:"notes_last_updated,omitempty"`
+	Email                          string  `json:"email"`
+	Firstname                      string  `json:"firstname,omitempty"`
+	Lastname                       string  `json:"lastname,omitempty"`
+	Company                        string  `json:"company,omitempty"`
+	Jobtitle                       string  `json:"jobtitle,omitempty"`
+	Industry                       string  `json:"industry,omitempty"`
+	Phone                          string  `json:"phone,omitempty"`
+	Lead_status                    string  `json:"lead_status,omitempty"`
+	Dealstage                      string  `json:"dealstage,omitempty"`
+	Amount                         float64 `json:"amount,omitempty"`
+	Num_meetings_booked            int     `json:"num_meetings_booked,omitempty"`
+	Num_calls                      int     `json:"num_calls,omitempty"`
+	Hs_email_replied               int     `json:"hs_email_replied,omitempty"`
+	Num_completed_tasks            int     `json:"num_completed_tasks,omitempty"`
+	Hs_last_sales_activity_timestamp string `json:"hs_last_sales_activity_timestamp,omitempty"`
+	Create_date                    string  `json:"create_date,omitempty"`
 }
 
 type Leads_request struct {
@@ -90,6 +89,7 @@ func get_env(key, default_value string) string {
 func calculate_score(lead Lead, weights map[string]float64) Lead_score {
 	var factors []Score_factor
 	var total_score float64
+	var total_weight_used float64
 
 	add_factor := func(name string, weight, value float64) {
 		if weight <= 0 || value <= 0 {
@@ -97,6 +97,7 @@ func calculate_score(lead Lead, weights map[string]float64) Lead_score {
 		}
 		contribution := value * weight
 		total_score += contribution
+		total_weight_used += weight
 		factors = append(factors, Score_factor{
 			Name:         name,
 			Weight:       weight,
@@ -105,80 +106,199 @@ func calculate_score(lead Lead, weights map[string]float64) Lead_score {
 		})
 	}
 
-	add_factor("Lead Source", weights["lead_source"], bool_to_float(lead.Email != ""))
-	add_factor("Valid Email", weights["has_valid_email"], bool_to_float(is_valid_email(lead.Email)))
-	add_factor("Company Match", weights["has_company_match"], bool_to_float(lead.Company != ""))
-	add_factor("Industry Match", weights["industry_match"], bool_to_float(lead.Industry != ""))
-
-	if lead.Create_date != "" {
-		if create_time, err := parse_date(lead.Create_date); err == nil {
-			days := int(time.Since(create_time).Hours() / 24)
-			value := math.Max(0, math.Min(1, 1-float64(days)/90))
-			add_factor("Recency", weights["days_since_created"], value)
+	// 1. Deal Stage
+	if weights["deal_stage"] > 0 {
+		stage_scores := map[string]float64{
+			"closedwon":              1.0,
+			"contractsent":          0.85,
+			"decisionmakerboughtin": 0.75,
+			"presentationscheduled": 0.6,
+			"qualifiedtobuy":       0.5,
+			"appointmentscheduled":  0.4,
+			"closedlost":           0.1,
 		}
-	}
-
-	if lead.Lead_status != "" {
-		status_values := map[string]float64{
-			"new":         0.3,
-			"open":        0.5,
-			"in_progress": 0.7,
-			"qualified":   1.0,
-			"unqualified": 0.1,
-		}
-		value := 0.5
-		if v, ok := status_values[strings.ToLower(lead.Lead_status)]; ok {
-			value = v
-		}
-		add_factor("Lead Status", weights["lead_status"], value)
-	}
-
-	opens := float64(lead.Email_open_count)
-	clicks := float64(lead.Email_click_count)
-	engagement_value := math.Min(1, (opens/10)*0.4+(clicks/3)*0.6)
-	add_factor("Engagement", weights["engagement_score"], engagement_value)
-
-	profile_fields := []string{
-		lead.Email, lead.Firstname, lead.Lastname,
-		lead.Company, lead.Jobtitle, lead.Phone,
-		lead.City, lead.Country, lead.Industry,
-	}
-	filled_count := 0
-	for _, field := range profile_fields {
-		if field != "" {
-			filled_count++
-		}
-	}
-	profile_value := float64(filled_count) / float64(len(profile_fields))
-	add_factor("Profile Complete", weights["profile_completeness"], profile_value)
-
-	if lead.Jobtitle != "" {
-		title := strings.ToLower(lead.Jobtitle)
-		title_value := 0.3
-		switch {
-		case contains_any(title, "ceo", "founder", "owner"):
-			title_value = 1.0
-		case contains_any(title, "director", "vp", "chief"):
-			title_value = 0.8
-		case contains_any(title, "manager", "head"):
-			title_value = 0.6
-		}
-		add_factor("Company Size", weights["company_size_bucket"], title_value)
-	}
-
-	recency_value := 0.2
-	if lead.Num_deals > 0 {
-		recency_value = 0.7
-	} else if lead.Notes_last_update != "" {
-		if notes_time, err := parse_date(lead.Notes_last_update); err == nil {
-			if time.Since(notes_time).Hours() < 30*24 {
-				recency_value = 0.5
+		stage := strings.ToLower(lead.Dealstage)
+		value := 0.0
+		if stage != "" {
+			if v, ok := stage_scores[stage]; ok {
+				value = v
+			} else {
+				value = 0.2
 			}
 		}
+		add_factor("deal_stage", weights["deal_stage"], value)
 	}
-	add_factor("Activity Recency", weights["recency_score"], recency_value)
 
-	score := int(math.Round(clamp(total_score*100, 0, 100)))
+	// 2. Deal Amount
+	if weights["deal_amount"] > 0 && lead.Amount > 0 {
+		value := math.Min(1.0, lead.Amount/100000+0.3)
+		add_factor("deal_amount", weights["deal_amount"], value)
+	}
+
+	// 3. Lead Status
+	if weights["lead_status"] > 0 {
+		status_scores := map[string]float64{
+			"qualified":   1.0,
+			"in_progress": 0.7,
+			"open":        0.5,
+			"new":         0.3,
+			"unqualified": 0.1,
+			"bad_timing":  0.2,
+		}
+		status := strings.ToLower(lead.Lead_status)
+		value := 0.2
+		if status != "" {
+			if v, ok := status_scores[status]; ok {
+				value = v
+			} else {
+				value = 0.3
+			}
+		}
+		add_factor("lead_status", weights["lead_status"], value)
+	}
+
+	// 4. Days Since Last Activity
+	if weights["days_since_last_activity"] > 0 {
+		value := 0.05
+		if lead.Hs_last_sales_activity_timestamp != "" {
+			if t, err := parse_date(lead.Hs_last_sales_activity_timestamp); err == nil {
+				days := int(time.Since(t).Hours() / 24)
+				switch {
+				case days <= 3:
+					value = 1.0
+				case days <= 7:
+					value = 0.8
+				case days <= 14:
+					value = 0.6
+				case days <= 30:
+					value = 0.4
+				case days <= 60:
+					value = 0.2
+				}
+			}
+		}
+		add_factor("days_since_last_activity", weights["days_since_last_activity"], value)
+	}
+
+	// 5. Meeting Booked Count
+	if weights["meeting_booked_count"] > 0 {
+		value := 0.0
+		if lead.Num_meetings_booked >= 3 {
+			value = 1.0
+		} else if lead.Num_meetings_booked >= 1 {
+			value = 0.7
+		}
+		add_factor("meeting_booked_count", weights["meeting_booked_count"], value)
+	}
+
+	// 6. Call Completed Count
+	if weights["call_completed_count"] > 0 {
+		value := 0.0
+		if lead.Num_calls >= 5 {
+			value = 1.0
+		} else if lead.Num_calls >= 2 {
+			value = 0.6
+		} else if lead.Num_calls >= 1 {
+			value = 0.4
+		}
+		add_factor("call_completed_count", weights["call_completed_count"], value)
+	}
+
+	// 7. Email Reply Count
+	if weights["email_reply_count"] > 0 {
+		value := 0.0
+		if lead.Hs_email_replied >= 5 {
+			value = 1.0
+		} else if lead.Hs_email_replied >= 2 {
+			value = 0.7
+		} else if lead.Hs_email_replied >= 1 {
+			value = 0.5
+		}
+		add_factor("email_reply_count", weights["email_reply_count"], value)
+	}
+
+	// 8. Tasks Completed
+	if weights["tasks_completed_count"] > 0 {
+		value := math.Min(1.0, float64(lead.Num_completed_tasks)/5)
+		add_factor("tasks_completed_count", weights["tasks_completed_count"], value)
+	}
+
+	// 9. Days Since Create
+	if weights["days_since_create"] > 0 {
+		value := 0.2
+		if lead.Create_date != "" {
+			if t, err := parse_date(lead.Create_date); err == nil {
+				days := int(time.Since(t).Hours() / 24)
+				switch {
+				case days <= 7:
+					value = 1.0
+				case days <= 30:
+					value = 0.7
+				case days <= 90:
+					value = 0.4
+				}
+			}
+		}
+		add_factor("days_since_create", weights["days_since_create"], value)
+	}
+
+	// 10. Job Title Seniority
+	if weights["job_title_seniority"] > 0 && lead.Jobtitle != "" {
+		title := strings.ToLower(lead.Jobtitle)
+		value := 0.3
+		switch {
+		case contains_any(title, "ceo", "founder", "owner", "president", "chief"):
+			value = 1.0
+		case contains_any(title, "vp", "vice president", "director"):
+			value = 0.8
+		case contains_any(title, "head", "manager", "lead"):
+			value = 0.6
+		case contains_any(title, "senior", "sr"):
+			value = 0.4
+		}
+		add_factor("job_title_seniority", weights["job_title_seniority"], value)
+	}
+
+	// 11. Has Email Valid
+	if weights["has_email_valid"] > 0 {
+		value := bool_to_float(is_valid_email(lead.Email))
+		add_factor("has_email_valid", weights["has_email_valid"], value)
+	}
+
+	// 12. Profile Completeness
+	if weights["profile_completeness"] > 0 {
+		filled := 0
+		for _, f := range []string{lead.Email, lead.Firstname, lead.Lastname, lead.Company, lead.Jobtitle, lead.Phone, lead.Industry} {
+			if f != "" {
+				filled++
+			}
+		}
+		value := float64(filled) / 7.0
+		add_factor("profile_completeness", weights["profile_completeness"], value)
+	}
+
+	// 13. Has Phone
+	if weights["has_phone"] > 0 {
+		value := bool_to_float(lead.Phone != "")
+		add_factor("has_phone", weights["has_phone"], value)
+	}
+
+	// Normalization (same as MCP)
+	total_weights := 0.0
+	for _, w := range weights {
+		total_weights += w
+	}
+	normalized := 0.0
+	if total_weight_used > 0 {
+		normalized = total_score / total_weight_used
+	}
+	completeness := 0.0
+	if total_weights > 0 {
+		completeness = total_weight_used / total_weights
+	}
+	completeness_multiplier := 0.5 + 0.5*completeness
+
+	score := int(math.Round(clamp(normalized*completeness_multiplier*100, 0, 100)))
 
 	return Lead_score{
 		Email:   lead.Email,
@@ -250,10 +370,14 @@ func parse_date(date_str string) (time.Time, error) {
 
 // API client
 
-func fetch_config(email, api_key string) (*Config_response, error) {
-	body, _ := json.Marshal(map[string]string{"email": email, "api_key": api_key})
+func fetch_config(api_key string) (*Config_response, error) {
+	req, err := http.NewRequest(http.MethodGet, config_api_url+"/api/config", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-API-Key", api_key)
 
-	resp, err := http.Post(config_api_url+"/config", "application/json", bytes.NewBuffer(body))
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch config: %w", err)
 	}
@@ -320,12 +444,7 @@ func leads_handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config_email := req.Email
-	if req.Client_id != "" {
-		config_email = req.Client_id
-	}
-
-	config, err := fetch_config(config_email, req.Api_key)
+	config, err := fetch_config(req.Api_key)
 	if err != nil {
 		log.Printf("Failed to fetch config: %v", err)
 		if strings.Contains(err.Error(), "unauthorized") {
