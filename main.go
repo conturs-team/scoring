@@ -16,12 +16,12 @@ import (
 
 type Lead struct {
 	Email                          string  `json:"email"`
-	Firstname                      string  `json:"firstname,omitempty"`
-	Lastname                       string  `json:"lastname,omitempty"`
+	Has_firstname                  bool    `json:"has_firstname,omitempty"`
+	Has_lastname                   bool    `json:"has_lastname,omitempty"`
 	Company                        string  `json:"company,omitempty"`
 	Jobtitle                       string  `json:"jobtitle,omitempty"`
 	Industry                       string  `json:"industry,omitempty"`
-	Phone                          string  `json:"phone,omitempty"`
+	Has_phone                      bool    `json:"has_phone,omitempty"`
 	Lead_status                    string  `json:"lead_status,omitempty"`
 	Dealstage                      string  `json:"dealstage,omitempty"`
 	Amount                         float64 `json:"amount,omitempty"`
@@ -268,10 +268,19 @@ func calculate_score(lead Lead, weights map[string]float64) Lead_score {
 	// 12. Profile Completeness
 	if weights["profile_completeness"] > 0 {
 		filled := 0
-		for _, f := range []string{lead.Email, lead.Firstname, lead.Lastname, lead.Company, lead.Jobtitle, lead.Phone, lead.Industry} {
+		for _, f := range []string{lead.Email, lead.Company, lead.Jobtitle, lead.Industry} {
 			if f != "" {
 				filled++
 			}
+		}
+		if lead.Has_firstname {
+			filled++
+		}
+		if lead.Has_lastname {
+			filled++
+		}
+		if lead.Has_phone {
+			filled++
 		}
 		value := float64(filled) / 7.0
 		add_factor("profile_completeness", weights["profile_completeness"], value)
@@ -279,7 +288,7 @@ func calculate_score(lead Lead, weights map[string]float64) Lead_score {
 
 	// 13. Has Phone
 	if weights["has_phone"] > 0 {
-		value := bool_to_float(lead.Phone != "")
+		value := bool_to_float(lead.Has_phone)
 		add_factor("has_phone", weights["has_phone"], value)
 	}
 
