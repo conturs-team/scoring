@@ -442,7 +442,7 @@ func auth_handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config, err := fetch_config(api_key)
+	_, err := fetch_config(api_key)
 	if err != nil {
 		if strings.Contains(err.Error(), "unauthorized") {
 			write_error(w, http.StatusUnauthorized, "Invalid API key")
@@ -453,8 +453,7 @@ func auth_handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	write_json(w, http.StatusOK, map[string]string{
-		"status":    "valid",
-		"client_id": config.Client_id,
+		"status": "valid",
 	})
 }
 
