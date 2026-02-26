@@ -36,7 +36,6 @@ type Lead struct {
 type Leads_request struct {
 	Leads     []Lead `json:"leads"`
 	Client_id string `json:"client_id,omitempty"`
-	Api_key   string `json:"api_key"`
 	Email     string `json:"email"`
 }
 
@@ -443,7 +442,8 @@ func leads_handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Api_key == "" || req.Email == "" {
+	api_key := r.Header.Get("X-API-Key")
+	if api_key == "" || req.Email == "" {
 		write_error(w, http.StatusUnauthorized, "api_key and email required")
 		return
 	}
@@ -453,7 +453,7 @@ func leads_handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	config, err := fetch_config(req.Api_key)
+	config, err := fetch_config(api_key)
 	if err != nil {
 		log.Printf("Failed to fetch config: %v", err)
 		if strings.Contains(err.Error(), "unauthorized") {
