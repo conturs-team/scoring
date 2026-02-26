@@ -430,6 +430,34 @@ func health_handler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func auth_handler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		write_error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	api_key := r.Header.Get("X-API-Key")
+	if api_key == "" {
+		write_error(w, http.StatusUnauthorized, "api_key required")
+		return
+	}
+
+	config, err := fetch_config(api_key)
+	if err != nil {
+		if strings.Contains(err.Error(), "unauthorized") {
+			write_error(w, http.StatusUnauthorized, "Invalid API key")
+			return
+		}
+		write_error(w, http.StatusInternalServerError, "Failed to validate API key")
+		return
+	}
+
+	write_json(w, http.StatusOK, map[string]string{
+		"status":    "valid",
+		"client_id": config.Client_id,
+	})
+}
+
 func leads_handler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		write_error(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -480,6 +508,7 @@ func leads_handler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	http.HandleFunc("/health", health_handler)
+	http.HandleFunc("/auth", auth_handler)
 	http.HandleFunc("/leads", leads_handler)
 
 	addr := ":" + port
