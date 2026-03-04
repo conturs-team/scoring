@@ -448,7 +448,7 @@ func auth_handler(w http.ResponseWriter, r *http.Request) {
 			write_error(w, http.StatusUnauthorized, "Invalid API key")
 			return
 		}
-		write_error(w, http.StatusInternalServerError, "Failed to validate API key")
+		write_error(w, http.StatusUnauthorized, "Failed to validate API key")
 		return
 	}
 
